@@ -35,6 +35,9 @@ BASE_RISK_UNIT = 0.01 #1%
 BASE_RISK_BONUS = 0.005
 MANSFIELD_PERIOD = 26
 MANSFIELD_THRESHOLD = -0.02
+MANSFIELD_RISK_BONUS_THRESHOLD = 0.1
+MIN_VOLUME_RISK_BONUS = 1.2
+MAX_VOLUME_RISK_BONUS = 2
 MAX_NOTIONAL_PCT = 0.10 #15%
 TIME_STOP_DAYS = 365
 DELISTING_PENALTY = 0.50
@@ -316,8 +319,8 @@ for today in tqdm(all_dates, desc="Backtest"):
         #    dd_risk_mult = 0.5  # rynek w szarej strefie — handlujemy ale ostrożniej
 
         rel_vol   = s['volume'] / s['vol_ma']
-        bonus_msf = BASE_RISK_BONUS if s['mansfield'] > 0.1 else 0
-        bonus_vol = BASE_RISK_BONUS if 1.2 <= rel_vol <= 2.0 else 0
+        bonus_msf = BASE_RISK_BONUS if s['mansfield'] > MANSFIELD_RISK_BONUS_THRESHOLD else 0
+        bonus_vol = BASE_RISK_BONUS if MIN_VOLUME_RISK_BONUS <= rel_vol <= MAX_VOLUME_RISK_BONUS else 0
         total_risk_pct = (BASE_RISK_UNIT + bonus_msf + bonus_vol) * dd_risk_mult
 
         risk_dist = 1.2 * s['atr']

@@ -17,6 +17,9 @@ VOL_ENG_MULT        = 1.2
 VOL_GAP_MULT        = 1.5
 MANSFIELD_PERIOD    = 26
 MANSFIELD_THRESHOLD = -0.02
+MANSFIELD_RISK_BONUS_THRESHOLD = 0.1
+MIN_VOLUME_RISK_BONUS = 1.2
+MAX_VOLUME_RISK_BONUS = 2
 LIQ_THRESHOLD       = 10_000_000
 CHANDELIER_MULT     = 6.0    # wspolna stala z symulatorem
 
@@ -220,8 +223,8 @@ def main():
             # Logika ryzyka v23.1
             risk_mult = 1.0
             vol_ratio = row['volume'] / row['vol_ma']
-            if row['mansfield'] > 0.10:    risk_mult += 0.5
-            if 1.20 <= vol_ratio <= 2.00:  risk_mult += 0.5
+            if row['mansfield'] > MANSFIELD_RISK_BONUS_THRESHOLD:    risk_mult += 0.5
+            if MIN_VOLUME_RISK_BONUS <= vol_ratio <= MAX_VOLUME_RISK_BONUS:  risk_mult += 0.5
 
             total_risk_pct = BASE_RISK_UNIT * risk_mult
             risk_dist      = risk_dist_mult * row['atr']
@@ -276,7 +279,7 @@ def main():
         print("-" * 125)
         print(df_res.to_string(index=False))
         print("-" * 125)
-        print(f"NOTIONAL = pozycja przycieta przez limit {MAX_NOTIONAL_PCT*100}% (wg ryzyka mogla byc wieksza)")
+        print(f"NOTIONAL = pozycja przycieta przez limit {MAX_NOTIONAL_PCT*100}%")
         print(f"risk     = pozycja wyznaczona przez ryzyko (nie trafila w limit notional)")
     else:
         print("Brak sygnalow spelniajacych kryteria.")
