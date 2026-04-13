@@ -20,17 +20,19 @@ MANSFIELD_THRESHOLD = -0.02
 MANSFIELD_RISK_BONUS_THRESHOLD = 0.1
 MIN_VOLUME_RISK_BONUS = 1.2
 MAX_VOLUME_RISK_BONUS = 2
-LIQ_THRESHOLD       = 10_000_000
+MIN_VOLUME          = 10_000_000
 CHANDELIER_MULT     = 6.0    # wspolna stala z symulatorem
 
 # Parametry ryzyka
 BASE_RISK_UNIT      = 0.01   # 1% bazy
+BASE_RISK_BONUS     = 0.005  # bonus za Mansfield lub wolumen (addytywny, jak w backtest)
 MAX_NOTIONAL_PCT    = 0.15   # 15% max na spolke
 EXCLUDED_SECTORS = {'Financials', 'Energy'}
 
 # Tryb normalny:       risk_dist = RISK_DIST_NORMAL x ATR  (ciasny, wieksza pozycja)
 # Tryb konserwatywny:  risk_dist = CHANDELIER_MULT  x ATR  (szeroki = realny SL)
 RISK_DIST_NORMAL    = 1.2
+SLIPPAGE            = 0.005  # 0.5% — zgodny z backtest, uzywany do wyceny pozycji
 # ══════════════════════════════════════════════════════════════════════════════
 
 
@@ -84,7 +86,7 @@ def calculate_indicators(df, market_df):
     df['ema20_trending'] = df['ema20'] > df['ema20'].shift(5)
 
     df['vol_ma'] = v.rolling(20).mean()
-    df['liq_ok'] = (c * v).rolling(20).mean() > LIQ_THRESHOLD
+    df['liq_ok'] = (c * v).rolling(20).mean() > MIN_VOLUME
 
     body  = abs(c - o)
     vol_f = v > df['vol_ma']
@@ -106,7 +108,7 @@ def calculate_indicators(df, market_df):
 
     df['setup_ok'] = (
         (c > df['ema200']) &
-        (c >= df['ema20'] * 0.995) &
+        (c > df['ema20']) &
         (df['mansfield'] > MANSFIELD_THRESHOLD) &
         (df['macd_slope_up']) &
         (df['any_trigger']) &
@@ -220,21 +222,20 @@ def main():
 
             row = r.iloc[0]
 
-            # Logika ryzyka v23.1
-            risk_mult = 1.0
-            vol_ratio = row['volume'] / row['vol_ma']
-            if row['mansfield'] > MANSFIELD_RISK_BONUS_THRESHOLD:    risk_mult += 0.5
-            if MIN_VOLUME_RISK_BONUS <= vol_ratio <= MAX_VOLUME_RISK_BONUS:  risk_mult += 0.5
-
-            total_risk_pct = BASE_RISK_UNIT * risk_mult
+            # Logika ryzyka — zgodna z backtest v23.0 (addytywna)
+            vol_ratio  = row['volume'] / row['vol_ma']
+            bonus_msf  = BASE_RISK_BONUS if row['mansfield'] > MANSFIELD_RISK_BONUS_THRESHOLD else 0
+            bonus_vol  = BASE_RISK_BONUS if MIN_VOLUME_RISK_BONUS <= vol_ratio <= MAX_VOLUME_RISK_BONUS else 0
+            total_risk_pct = BASE_RISK_UNIT + bonus_msf + bonus_vol
             risk_dist      = risk_dist_mult * row['atr']
 
             if risk_dist <= 0:
                 logging.debug(f"{ticker}: risk_dist <= 0, pomijam")
                 continue
 
+            entry_est          = row['close'] * (1 + SLIPPAGE)   # szacowana cena wejscia (jak w backtest)
             shares_by_risk     = int((args.cap * total_risk_pct) / risk_dist)
-            shares_by_notional = int((args.cap * MAX_NOTIONAL_PCT) // row['close'])
+            shares_by_notional = int((args.cap * MAX_NOTIONAL_PCT) // entry_est)
             shares             = min(shares_by_risk, shares_by_notional)
 
             if shares <= 0:
@@ -242,10 +243,10 @@ def main():
                 continue
 
             sl_price      = row['close'] - (CHANDELIER_MULT * row['atr'])
-            real_risk_usd = (row['close'] - sl_price) * shares
+            real_risk_usd = (entry_est - sl_price) * shares
             real_risk_pct = real_risk_usd / args.cap * 100
 
-            cap_flag = 'NOTIONAL' if (shares == shares_by_notional and shares_by_risk > shares_by_notional) else 'risk'
+            cap_flag = 'wallet' if (shares == shares_by_notional and shares_by_risk > shares_by_notional) else 'risk'
 
             trig_list = [
                 name for cond, name in zip(
@@ -255,17 +256,18 @@ def main():
             ]
 
             signals.append({
-                'Ticker':    ticker,
-                'Sektor':    sector_map.get(ticker, 'Unknown'),
-                'Mansfield': round(row['mansfield'], 3),
-                'RealRisk%': round(real_risk_pct, 2),
-                'Limit':     cap_flag,
-                'Sygnal':    ", ".join(trig_list),
-                'Cena':      round(row['close'], 2),
-                'SL':        round(sl_price, 2),
-                'Akcje':     shares,
-                'Pozycja$':  round(shares * row['close'], 2),
-                'Notional%': round((shares * row['close'] / args.cap) * 100, 1),
+                'Ticker':     ticker,
+                'Sektor':     sector_map.get(ticker, 'Unknown'),
+                'Mansfield':  round(row['mansfield'], 3),
+                'RealRisk%':  round(real_risk_pct, 2),
+                'LimitBy':    cap_flag,
+                'Sygnal':     ", ".join(trig_list),
+                'Cena':       round(row['close'], 2),
+                'WejscieEst': round(entry_est, 2),
+                'SL':         round(sl_price, 2),
+                'Akcje':      shares,
+                'Pozycja$':   round(shares * entry_est, 2),
+                'Wallet%':    round((shares * entry_est / args.cap) * 100, 1),
             })
 
         except Exception as e:
@@ -274,13 +276,15 @@ def main():
 
     print("\n" + "=" * 125)
     if signals:
-        df_res = pd.DataFrame(signals).sort_values(['RealRisk%', 'Mansfield'], ascending=[False, False])
+        df_res = pd.DataFrame(signals).sort_values(['RealRisk%', 'Mansfield'], ascending=[False, False]).reset_index(drop=True)
+        df_res.insert(0, 'Nr', df_res.index + 1)
         print(f"KANDYDACI | Kapital: {args.cap}$ | Filtr: {market_filter_label} | Tryb: {mode_label} | Limit pozycji: {MAX_NOTIONAL_PCT*100}%")
         print("-" * 125)
         print(df_res.to_string(index=False))
         print("-" * 125)
-        print(f"NOTIONAL = pozycja przycieta przez limit {MAX_NOTIONAL_PCT*100}%")
-        print(f"risk     = pozycja wyznaczona przez ryzyko (nie trafila w limit notional)")
+        print(f"LimitBy: wallet = pozycja przycieta przez limit portfela {MAX_NOTIONAL_PCT*100}% (notional cap)")
+        print(f"LimitBy: risk   = pozycja wyznaczona przez ryzyko (nie trafila w limit portfela)")
+        print(f"WejscieEst  = Cena * (1 + {SLIPPAGE}) — szacowana cena wejscia po slippage (jak w backtest)")
     else:
         print("Brak sygnalow spelniajacych kryteria.")
     print("=" * 125)
