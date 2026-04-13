@@ -26,7 +26,7 @@ CHANDELIER_MULT     = 6.0    # wspolna stala z symulatorem
 # Parametry ryzyka
 BASE_RISK_UNIT      = 0.01   # 1% bazy
 MAX_NOTIONAL_PCT    = 0.15   # 15% max na spolke
-EXCLUDED_SECTORS    = set()
+EXCLUDED_SECTORS = {'Financials', 'Energy'}
 
 # Tryb normalny:       risk_dist = RISK_DIST_NORMAL x ATR  (ciasny, wieksza pozycja)
 # Tryb konserwatywny:  risk_dist = CHANDELIER_MULT  x ATR  (szeroki = realny SL)
