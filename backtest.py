@@ -46,8 +46,8 @@ MIN_VOLUME = 10_000_000
 TECH_DAYS_DATA = 400
 MC_SIM = 100000
 SKIP_CHANCE = 0.1 #10%
-#EXCLUDED_SECTORS={} #jp
 EXCLUDED_SECTORS = {'Financials', 'Energy'} #us
+#EXCLUDED_SECTORS={'Utilities', 'Healthcare'} #jp
 #EXCLUDED_SECTORS = {'Communication Services', 'Utilities', 'Financials', 'Energy'} #uk
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -326,8 +326,8 @@ for today in tqdm(all_dates, desc="Backtest"):
         bonus_msf = BASE_RISK_BONUS if s['mansfield'] > MANSFIELD_RISK_BONUS_THRESHOLD else 0
         bonus_vol = BASE_RISK_BONUS if MIN_VOLUME_RISK_BONUS <= rel_vol <= MAX_VOLUME_RISK_BONUS else 0
         total_risk_pct = (BASE_RISK_UNIT + bonus_msf + bonus_vol) * dd_risk_mult
-
         risk_dist = 1.2 * s['atr']
+
         sz = min(
             int((total_equity * total_risk_pct) / risk_dist),
             int((total_equity * MAX_NOTIONAL_PCT) // entry_p)
@@ -381,7 +381,7 @@ else:
         yearly_end_equity[d.year] = eq
 
     roi_pct = (equity_curve[-1] - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100
-    print(f"v23.0 FINAL | EQUITY: {equity_curve[-1]:.2f} | ROI: {roi_pct:.2f}% | MDD: {mdd:.2f}% | PF: {overall_pf:.2f} | WIN%: {(t_log['win'].sum() / len(t_log) * 100):.1f}%")
+    print(f"EQUITY: {equity_curve[-1]:.2f} | ROI: {roi_pct:.2f}% | MDD: {mdd:.2f}% | PF: {overall_pf:.2f} | WIN%: {(t_log['win'].sum() / len(t_log) * 100):.1f}%")
     print("=" * 125)
     # Liczniki pominiętych per rok
     skipped_df = pd.DataFrame(skipped_log, columns=['year', 'reason']) if skipped_log else pd.DataFrame(columns=['year', 'reason'])
@@ -435,7 +435,7 @@ else:
         msf = t_log.groupby('msf_bucket')[['pnl_pct', 'win']].agg(['mean', 'count'])
         print(msf.round(2))
 
-    t_log.to_csv("trade_log_v23_0.csv", index=False)
+    t_log.to_csv("trade_log.csv", index=False)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # [4/4] MONTE CARLO (losowa kolejność transakcji)
