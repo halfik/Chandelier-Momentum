@@ -70,6 +70,14 @@ def calc_adx(h, l, c, period=14):
     dx = (100 * (plus_di - minus_di).abs() / (plus_di + minus_di))
     return dx.ewm(span=period, adjust=False).mean()
 
+def calculate_cagr(start_value, end_value, start_date, end_date):
+    """Oblicza roczną stopę zwrotu (CAGR) na podstawie dat"""
+    days = (end_date - start_date).days
+    years = days / 365.25
+    if years <= 0 or start_value <= 0:
+        return 0.0
+    return (end_value / start_value) ** (1.0 / years) - 1.0
+
 if not os.path.exists(CSV_PATH) or not os.path.exists(SPX_PATH):
     print("BŁĄD: Brakuje plików CSV!")
     exit()
@@ -375,6 +383,11 @@ else:
     mdd = ((eq_ser - eq_ser.cummax()) / eq_ser.cummax()).min() * 100
     overall_pf = calc_pf(t_log['pnl'])
 
+    # --- CAGR ---
+    start_date = all_dates[0]
+    end_date = all_dates[-1]
+    cagr = calculate_cagr(INITIAL_CAPITAL, equity_curve[-1], start_date, end_date)
+
     # Equity na koniec każdego roku - ostatnia wartość equity_curve w danym roku
     date_equity = list(zip(all_dates, equity_curve))
     yearly_end_equity = {}
@@ -382,7 +395,7 @@ else:
         yearly_end_equity[d.year] = eq
 
     roi_pct = (equity_curve[-1] - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100
-    print(f"EQUITY: {equity_curve[-1]:.2f} | ROI: {roi_pct:.2f}% | MDD: {mdd:.2f}% | PF: {overall_pf:.2f} | WIN%: {(t_log['win'].sum() / len(t_log) * 100):.1f}%")
+    print(f"EQUITY: {equity_curve[-1]:.2f} | ROI: {roi_pct:.2f}% | CAGR: {cagr:.2%} | MDD: {mdd:.2f}% | PF: {overall_pf:.2f} | WIN%: {(t_log['win'].sum() / len(t_log) * 100):.1f}%")
     print("=" * 125)
     # Liczniki pominiętych per rok
     skipped_df = pd.DataFrame(skipped_log, columns=['year', 'reason']) if skipped_log else pd.DataFrame(columns=['year', 'reason'])
