@@ -11,7 +11,7 @@ warnings.filterwarnings('ignore')
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# KONFIGURACJA ZGODNA Z v23.1 (STABILNA)
+# KONFIGURACJA
 # ══════════════════════════════════════════════════════════════════════════════
 VOL_ENG_MULT        = 1.2
 VOL_GAP_MULT        = 1.5

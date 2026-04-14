@@ -16,7 +16,7 @@ args = parser.parse_args()
 DIAG = args.diag
 
 # ══════════════════════════════════════════════════════════════════════════════
-# KONFIGURACJA v23.0 (1% Base + Bonuses | FULL LOGGING)
+# KONFIGURACJA (1% Base + Bonuses | FULL LOGGING)
 # ══════════════════════════════════════════════════════════════════════════════
 CSV_PATH = "data/spx/stocks_with_sector.csv"
 SPX_PATH = "data/spx/index.csv"
