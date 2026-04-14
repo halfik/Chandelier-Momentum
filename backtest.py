@@ -216,6 +216,9 @@ equity_curve = []
 all_dates = sorted(data['date'].unique())
 yearly_start_equity = {all_dates[0].year: INITIAL_CAPITAL}
 
+# Liczniki pominiętych sygnałów
+skipped_log = []  # (year, reason)
+
 
 def make_log_entry(p, tk, exit_date, exit_price, pnl, note):
     return {
@@ -295,8 +298,10 @@ for today in tqdm(all_dates, desc="Backtest"):
         if s['ticker'] in positions:
             continue
         if len(positions) >= MAX_POSITIONS:
+            skipped_log.append((today.year, 'max_positions'))
             break
         if sum(1 for pos in positions.values() if pos['sector'] == s['sector']) >= MAX_PER_SECTOR:
+            skipped_log.append((today.year, 'max_sector'))
             continue
 
         future = td_dict[s['ticker']][td_dict[s['ticker']].index > today].head(1)
@@ -329,6 +334,9 @@ for today in tqdm(all_dates, desc="Backtest"):
             int((total_equity * MAX_NOTIONAL_PCT) // entry_p)
         )
 
+        if sz > 0 and cash < (entry_p * sz):
+            skipped_log.append((today.year, 'no_cash'))
+            continue
         if sz > 0 and cash >= (entry_p * sz):
             cash -= entry_p * sz
             positions[s['ticker']] = {
@@ -367,16 +375,31 @@ else:
     mdd = ((eq_ser - eq_ser.cummax()) / eq_ser.cummax()).min() * 100
     overall_pf = calc_pf(t_log['pnl'])
 
+    # Equity na koniec każdego roku - ostatnia wartość equity_curve w danym roku
+    date_equity = list(zip(all_dates, equity_curve))
+    yearly_end_equity = {}
+    for d, eq in date_equity:
+        yearly_end_equity[d.year] = eq
+
     roi_pct = (equity_curve[-1] - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100
     print(f"v23.0 FINAL | EQUITY: {equity_curve[-1]:.2f} | ROI: {roi_pct:.2f}% | MDD: {mdd:.2f}% | PF: {overall_pf:.2f} | WIN%: {(t_log['win'].sum() / len(t_log) * 100):.1f}%")
     print("=" * 125)
-    print(f"{'YEAR':<6} | {'PNL':>11} | {'ROI':>9} | {'TRADES':>8} | {'WIN%':>6} | {'PF':>6} | NOTES")
-    print("-" * 125)
+    # Liczniki pominiętych per rok
+    skipped_df = pd.DataFrame(skipped_log, columns=['year', 'reason']) if skipped_log else pd.DataFrame(columns=['year', 'reason'])
+
+    print(f"{'YEAR':<6} | {'START_EQ':>10} | {'END_EQ':>10} | {'PNL':>11} | {'ROI':>9} | {'TRADES':>8} | {'WIN%':>6} | {'PF':>6} | {'SKIP_POS':>8} | {'SKIP_SEC':>8} | {'SKIP_CASH':>9} | NOTES")
+    print("-" * 155)
     for yr, y_grp in t_log.groupby('year'):
-        pnl_yr, trades = y_grp['pnl'].sum(), len(y_grp)
-        roi_yr = pnl_yr / yearly_start_equity.get(yr, INITIAL_CAPITAL) * 100
-        wr = y_grp['win'].sum() / trades * 100
-        print(f"{yr:<6} | {pnl_yr:>+11.2f} | {roi_yr:>9.2f}% | {trades:>8} | {wr:>6.1f}% | {calc_pf(y_grp['pnl']):>6.2f} | {y_grp['note'].value_counts().to_dict()}")
+        pnl_yr, trades  = y_grp['pnl'].sum(), len(y_grp)
+        start_eq        = yearly_start_equity.get(yr, INITIAL_CAPITAL)
+        end_eq          = yearly_end_equity.get(yr, start_eq)
+        roi_yr          = pnl_yr / start_eq * 100
+        wr              = y_grp['win'].sum() / trades * 100
+        yr_skipped      = skipped_df[skipped_df['year'] == yr]['reason'].value_counts() if not skipped_df.empty else {}
+        skip_pos        = yr_skipped.get('max_positions', 0)
+        skip_sec        = yr_skipped.get('max_sector', 0)
+        skip_cash       = yr_skipped.get('no_cash', 0)
+        print(f"{yr:<6} | {start_eq:>10.0f} | {end_eq:>10.0f} | {pnl_yr:>+11.2f} | {roi_yr:>9.2f}% | {trades:>8} | {wr:>6.1f}% | {calc_pf(y_grp['pnl']):>6.2f} | {skip_pos:>8} | {skip_sec:>8} | {skip_cash:>9} | {y_grp['note'].value_counts().to_dict()}")
 
     print("\nTypy wyjść:")
     for nt, cnt in t_log['note'].value_counts().items():
