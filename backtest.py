@@ -163,6 +163,7 @@ for tk, t in tqdm(df.groupby('ticker'), desc="Analiza Techniczna"):
     f_trending  = t['ema20_trending']
     f_liq       = t['liq_ok']
 
+    # walidacja czy mamy setup pod trade
     t['setup_ok'] = f_ema200 & f_ema20 & f_mansfield & f_macd & f_trigger & f_trending & f_liq
 
     if DIAG:
