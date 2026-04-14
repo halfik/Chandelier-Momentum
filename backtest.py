@@ -219,7 +219,6 @@ yearly_start_equity = {all_dates[0].year: INITIAL_CAPITAL}
 # Liczniki pominiętych sygnałów
 skipped_log = []  # (year, reason)
 
-
 def make_log_entry(p, tk, exit_date, exit_price, pnl, note):
     return {
         'ticker': tk,
@@ -439,7 +438,8 @@ else:
     t_log.to_csv("trade_log_v23_0.csv", index=False)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# [4/4] MONTE CARLO
+# [4/4] MONTE CARLO (losowa kolejność transakcji)
+# Hipoteza: czy system działa niezależnie od kolejności pojedynczych tradów?
 # ══════════════════════════════════════════════════════════════════════════════
 print(f"\nUruchamiam Monte Carlo {MC_SIM} symulacji)...")
 returns_pct = (t_log['pnl'] / t_log['equity_at_entry']).values
@@ -459,4 +459,63 @@ print(
     f"Percentyl 90%:    {np.percentile(mc_arr, 90):>10.2f} USD\n"
     f"Szansa na stratę: {(mc_arr < INITIAL_CAPITAL).mean() * 100:.2f}%"
 )
+print("=" * 125)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# [5/4] BOOTSTRAP LAT (losowa kolejność epok rynkowych)
+# Hipoteza: czy system działa niezależnie od kolejności lat rynkowych?
+# Różnica vs MC: tu losujemy całe lata ze zwracaniem, nie pojedyncze transakcje.
+# Testuje odporność na np. 3 bessy pod rząd albo brak lat byka przez dekadę.
+# Progi sukcesu: mediana > 200 000 USD i percentyl 5% > 50 000 USD
+# ══════════════════════════════════════════════════════════════════════════════
+BOOTSTRAP_SIM = 10_000  # 10k wystarczy — bootstrap lat jest szybki
+
+t_log['year'] = t_log['exit_date'].dt.year
+
+# Buduj słownik: rok → lista zwrotów z transakcji (jako % equity_at_entry)
+yearly_returns = {}
+for yr, grp in t_log.groupby('year'):
+    yearly_returns[yr] = (grp['pnl'] / grp['equity_at_entry']).tolist()
+
+years_available = sorted(yearly_returns.keys())
+n_years = len(years_available)
+
+print(f"Uruchamiam Bootstrap lat ({BOOTSTRAP_SIM} symulacji, {n_years} lat dostępnych)...")
+bootstrap_finals = []
+for _ in range(BOOTSTRAP_SIM):
+    # Losuj n_years lat ze zwracaniem (mogą się powtarzać)
+    sampled_years = np.random.choice(years_available, size=n_years, replace=True)
+    cap = INITIAL_CAPITAL
+    for yr in sampled_years:
+        for r in yearly_returns[yr]:
+            cap *= (1 + r)
+    bootstrap_finals.append(cap)
+
+bs_arr = np.array(bootstrap_finals)
+median_bs   = np.median(bs_arr)
+pct5_bs     = np.percentile(bs_arr, 5)
+pct10_bs    = np.percentile(bs_arr, 10)
+pct90_bs    = np.percentile(bs_arr, 90)
+prob_loss   = (bs_arr < INITIAL_CAPITAL).mean() * 100
+prob_100k   = (bs_arr > 100_000).mean() * 100
+prob_200k   = (bs_arr > 200_000).mean() * 100
+
+verdict_median = "✅ OK" if median_bs > 200_000 else "⚠️  SŁABO"
+verdict_p5     = "✅ OK" if pct5_bs   >  50_000 else "⚠️  SŁABO"
+
+print(f"\nBootstrap lat — wyniki ({n_years} lat losowanych ze zwracaniem):")
+print(f"  Mediana końcowego kapitału : {median_bs:>12.2f} USD  {verdict_median}  (próg: >200 000)")
+print(f"  Percentyl  5%              : {pct5_bs:>12.2f} USD  {verdict_p5}  (próg: > 50 000)")
+print(f"  Percentyl 10%              : {pct10_bs:>12.2f} USD")
+print(f"  Percentyl 90%              : {pct90_bs:>12.2f} USD")
+print(f"  Szansa na stratę           : {prob_loss:>11.2f}%")
+print(f"  Szansa na >100 000 USD     : {prob_100k:>11.2f}%")
+print(f"  Szansa na >200 000 USD     : {prob_200k:>11.2f}%")
+
+if median_bs > 200_000 and pct5_bs > 50_000:
+    print("\n  → Oba progi spełnione. System odporny na losową kolejność epok rynkowych.")
+elif median_bs > 200_000:
+    print("\n  → Mediana OK, ale ogon lewy słaby. System wrażliwy na złą sekwencję lat.")
+else:
+    print("\n  → Uwaga: system może być wrażliwy na kolejność epok rynkowych.")
 print("=" * 125)
