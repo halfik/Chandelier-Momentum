@@ -153,8 +153,11 @@ for tk, t in tqdm(df.groupby('ticker'), desc="Analiza Techniczna"):
     vol_f = t['volume'] > t['vol_ma']
 
     t_pinbar   = ((o.combine(c, min) - l) >= 2 * body) & vol_f
-    t_engulf   = ((c.shift(1) < o.shift(1)) & (c > o) & (c > o.shift(1)) &
-                  (o < c.shift(1)) & (t['volume'] > 1.2 * t['vol_ma']))
+    t_engulf = ((c.shift(1) < o.shift(1)) &  # poprzednia świeca bearish
+                (c > o) &  # obecna bullish
+                (o <= c.shift(1)) &  # open poniżej poprzedniego close
+                (c >= o.shift(1)) &  # close powyżej poprzedniego open
+                (t['volume'] > 1.2 * t['vol_ma']))
     t_breakout = (c > h.shift(1).rolling(10).max()) & vol_f
     t_gapgo    = (o > h.shift(1)) & (c > o) & (t['volume'] > 1.5 * t['vol_ma'])
     t_momentum = (t['mansfield'] > 0.5) & (c > o) & (c >= (h - 0.1 * (h - l)))
@@ -353,15 +356,17 @@ for today in tqdm(all_dates, desc="Backtest"):
             continue
         if sz > 0 and cash >= (entry_p * sz):
             cash -= entry_p * sz
-            # Wyznacz trigger (priorytet: breakout > gapgo > engulf > momentum > pinbar)
-            trig_flags = {
-                'BREAKOUT':  bool(s.get('trig_breakout', False)),
-                'GAPGO':     bool(s.get('trig_gapgo', False)),
-                'ENGULF':    bool(s.get('trig_engulf', False)),
-                'MOMENTUM':  bool(s.get('trig_momentum', False)),
-                'PINBAR':    bool(s.get('trig_pinbar', False)),
-            }
-            entry_trigger = next((k for k, v in trig_flags.items() if v), 'UNKNOWN')
+            # Zapisz wszystkie aktywne triggery po przecinku
+            active_triggers = [
+                name for name, col in [
+                    ('BREAKOUT', 'trig_breakout'),
+                    ('GAPGO',    'trig_gapgo'),
+                    ('ENGULF',   'trig_engulf'),
+                    ('MOMENTUM', 'trig_momentum'),
+                    ('PINBAR',   'trig_pinbar'),
+                ] if s.get(col, False)
+            ]
+            entry_trigger = ','.join(active_triggers) if active_triggers else 'UNKNOWN'
             positions[s['ticker']] = {
                 'ticker': s['ticker'],
                 'sector': s['sector'],
@@ -441,7 +446,7 @@ else:
     print("\nRozkład triggerów wejścia:")
     for trig, grp in t_log.groupby('trigger'):
         wr_t = grp['win'].sum() / len(grp) * 100
-        print(f"  {trig:<12}: {len(grp):>4} transakcji | win%: {wr_t:>5.1f}% | avg PnL: {grp['pnl'].mean():>+8.2f} | avg dni: {grp['days_held'].mean():.1f}")
+        print(f"  {trig:<30}: {len(grp):>4} transakcji | win%: {wr_t:>5.1f}% | avg PnL: {grp['pnl'].mean():>+8.2f} | avg dni: {grp['days_held'].mean():.1f}")
 
     if DIAG:
         print("\nRozkład PnL% (fat tail check):")
