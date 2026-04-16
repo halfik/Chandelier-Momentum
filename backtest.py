@@ -160,6 +160,11 @@ for tk, t in tqdm(df.groupby('ticker'), desc="Analiza Techniczna"):
     t_momentum = (t['mansfield'] > 0.5) & (c > o) & (c >= (h - 0.1 * (h - l)))
 
     t['any_trigger']    = t_pinbar | t_engulf | t_breakout | t_gapgo | t_momentum
+    t['trig_pinbar']    = t_pinbar
+    t['trig_engulf']    = t_engulf
+    t['trig_breakout']  = t_breakout
+    t['trig_gapgo']     = t_gapgo
+    t['trig_momentum']  = t_momentum
     t['ema20_trending'] = t['ema20'] > t['ema20'].shift(5)
     t['liq_ok']         = (c * t['volume']).rolling(20).mean() > MIN_VOLUME
 
@@ -248,6 +253,7 @@ def make_log_entry(p, tk, exit_date, exit_price, pnl, note):
         'ema20_at_entry': round(p.get('ema20_at_entry', 0), 4),
         'overext_at_entry': round(p.get('overext_at_entry', 0), 4),
         'equity_at_entry': round(p['equity_at_entry'], 2),
+        'trigger': p.get('trigger', ''),
     }
 
 for today in tqdm(all_dates, desc="Backtest"):
@@ -347,6 +353,15 @@ for today in tqdm(all_dates, desc="Backtest"):
             continue
         if sz > 0 and cash >= (entry_p * sz):
             cash -= entry_p * sz
+            # Wyznacz trigger (priorytet: breakout > gapgo > engulf > momentum > pinbar)
+            trig_flags = {
+                'BREAKOUT':  bool(s.get('trig_breakout', False)),
+                'GAPGO':     bool(s.get('trig_gapgo', False)),
+                'ENGULF':    bool(s.get('trig_engulf', False)),
+                'MOMENTUM':  bool(s.get('trig_momentum', False)),
+                'PINBAR':    bool(s.get('trig_pinbar', False)),
+            }
+            entry_trigger = next((k for k, v in trig_flags.items() if v), 'UNKNOWN')
             positions[s['ticker']] = {
                 'ticker': s['ticker'],
                 'sector': s['sector'],
@@ -362,6 +377,7 @@ for today in tqdm(all_dates, desc="Backtest"):
                 'mansfield_at_entry': s['mansfield'],
                 'ema20_at_entry': s['ema20'],
                 'overext_at_entry': round((s['close'] - s['ema20']) / s['ema20'], 4),
+                'trigger': entry_trigger,
             }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -421,6 +437,11 @@ else:
     print("\nRozkład sektorów:")
     for sec, grp in t_log.groupby('sector'):
         print(f"  {sec:<35}: {len(grp):>4} transakcji | avg PnL: {grp['pnl'].mean():>+8.2f}")
+
+    print("\nRozkład triggerów wejścia:")
+    for trig, grp in t_log.groupby('trigger'):
+        wr_t = grp['win'].sum() / len(grp) * 100
+        print(f"  {trig:<12}: {len(grp):>4} transakcji | win%: {wr_t:>5.1f}% | avg PnL: {grp['pnl'].mean():>+8.2f} | avg dni: {grp['days_held'].mean():.1f}")
 
     if DIAG:
         print("\nRozkład PnL% (fat tail check):")
