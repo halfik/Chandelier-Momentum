@@ -92,12 +92,12 @@ def calculate_indicators(df, market_df):
     vol_f = v > df['vol_ma']
 
     df['t_pinbar']   = ((o.combine(c, min) - l) >= 2 * body) & vol_f
-    df['t_engulf']   = (
-        (c.shift(1) < o.shift(1)) &  # poprzednia świeca bearish
-         (c > o) &  # obecna bullish
-         (o <= c.shift(1)) &  # open poniżej poprzedniego close
-         (c >= o.shift(1)) &  # close powyżej poprzedniego open
-         (t['volume'] > 1.2 * t['vol_ma'])
+    df['t_engulf'] = (
+            (c.shift(1) < o.shift(1)) &
+            (c > o) &
+            (o <= c.shift(1)) &
+            (c >= o.shift(1)) &
+            (v > VOL_ENG_MULT * df['vol_ma'])  # v zamiast t['volume'], VOL_ENG_MULT zamiast 1.2
     )
     df['t_breakout'] = (c > h.shift(1).rolling(10).max()) & vol_f
     df['t_gapgo']    = (o > h.shift(1)) & (c > o) & (v > VOL_GAP_MULT * df['vol_ma'])
