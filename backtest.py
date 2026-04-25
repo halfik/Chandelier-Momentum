@@ -274,6 +274,31 @@ for ticker, ticker_df in tqdm(df.groupby("ticker"), desc="Technical Analysis"):
     ticker_df["ema20_trending"] = ticker_df["ema20"] > ticker_df["ema20"].shift(5)
     ticker_df["liq_ok"] = (close * ticker_df["volume"]).rolling(20).mean() > MIN_VOLUME
 
+    # ── Extra columns logged at entry (analysis only, not used as filters) ────
+    ticker_df["ema50"] = calc_ema(close, 50)
+
+    # RSI-14
+    delta = close.diff()
+    gain = delta.clip(lower=0).ewm(com=13, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(com=13, adjust=False).mean()
+    ticker_df["rsi14"] = 100 - (100 / (1 + gain / loss.replace(0, 1e-10)))
+
+    # ATR as % of close price
+    ticker_df["atr_pct"] = ticker_df["atr"] / close
+
+    # Volume ratio: today's volume vs 20-day average
+    ticker_df["vol_ratio"] = ticker_df["volume"] / ticker_df["vol_ma"]
+
+    # Distance from 52-week high (negative = below high)
+    ticker_df["dist_52w_high"] = (close / high.rolling(252).max()) - 1
+
+    # Overextension from EMA50 and EMA200
+    ticker_df["overext_ema50"]  = (close - ticker_df["ema50"])  / ticker_df["ema50"]
+    ticker_df["overext_ema200"] = (close - ticker_df["ema200"]) / ticker_df["ema200"]
+
+    # MACD value at entry (not just slope direction)
+    ticker_df["macd_value"] = macd_line
+
     # Individual filter flags (used for diagnostic counting)
     f_ema200 = close > ticker_df["ema200"]
     f_ema20 = close > ticker_df["ema20"]
@@ -370,6 +395,15 @@ def make_trade_log_entry(
         "overext_at_entry": round(position.get("overext_at_entry", 0), 4),
         "equity_at_entry": round(position["equity_at_entry"], 2),
         "trigger": position.get("trigger", ""),
+        # ── Extra entry context (analysis only) ──
+        "rsi14_at_entry":       round(position.get("rsi14_at_entry", 0), 2),
+        "atr_pct_at_entry":     round(position.get("atr_pct_at_entry", 0), 4),
+        "vol_ratio_at_entry":   round(position.get("vol_ratio_at_entry", 0), 2),
+        "dist_52w_high_at_entry": round(position.get("dist_52w_high_at_entry", 0), 4),
+        "overext_ema50_at_entry":  round(position.get("overext_ema50_at_entry", 0), 4),
+        "overext_ema200_at_entry": round(position.get("overext_ema200_at_entry", 0), 4),
+        "macd_value_at_entry":  round(position.get("macd_value_at_entry", 0), 4),
+        "stop_dist_pct_at_entry": round(position.get("stop_dist_pct_at_entry", 0), 4),
     }
 
 
@@ -524,6 +558,8 @@ for today in tqdm(all_dates, desc="Backtest"):
         active_triggers = [name for name, col in trigger_map if signal.get(col, False)]
         entry_trigger = ",".join(active_triggers) if active_triggers else "UNKNOWN"
 
+        stop_distance_pct = stop_distance / entry_price
+
         positions[ticker] = {
             "ticker": ticker,
             "sector": signal["sector"],
@@ -540,6 +576,15 @@ for today in tqdm(all_dates, desc="Backtest"):
             "ema20_at_entry": signal["ema20"],
             "overext_at_entry": round((signal["close"] - signal["ema20"]) / signal["ema20"], 4),
             "trigger": entry_trigger,
+            # ── Extra entry context ──
+            "rsi14_at_entry":         signal.get("rsi14", 0),
+            "atr_pct_at_entry":       signal.get("atr_pct", 0),
+            "vol_ratio_at_entry":     signal.get("vol_ratio", 0),
+            "dist_52w_high_at_entry": signal.get("dist_52w_high", 0),
+            "overext_ema50_at_entry":  signal.get("overext_ema50", 0),
+            "overext_ema200_at_entry": signal.get("overext_ema200", 0),
+            "macd_value_at_entry":    signal.get("macd_value", 0),
+            "stop_dist_pct_at_entry": stop_distance_pct,
         }
 
 
