@@ -81,6 +81,11 @@ SKIP_CHANCE = 0.1            # Probability of randomly skipping a trade in MC (1
 VOL_ENGULF_MULT = 1.2   # Minimum relative volume for bullish-engulf trigger
 VOL_GAPGO_MULT  = 1.5   # Minimum relative volume for gap-and-go trigger
 
+# --- Sector rotation (swap weak for strong within same sector) ---
+ROTATION_ENABLED = False          # Enable sector rotation logic
+ROTATION_MIN_NEW = 0.5           # New signal must have Mansfield >= this
+ROTATION_MAX_OLD = 0.2           # Held position must have Mansfield <= this to be replaced
+
 # --- Sector exclusions (uncomment for the appropriate market) ---
 EXCLUDED_SECTORS = {"Financials", "Energy"}          # US
 # EXCLUDED_SECTORS = {"Utilities", "Healthcare"}       # Japan
@@ -481,6 +486,55 @@ for today in tqdm(all_dates, desc="Backtest"):
     if not market_regime.get(today, False):
         continue
 
+    # ── Sector rotation: swap weak positions for stronger screener signals ─────
+    # For each signal with Mansfield >= ROTATION_MIN_NEW, check if any held
+    # position in the same sector has current Mansfield <= ROTATION_MAX_OLD.
+    # If so, close the weak position so the new signal can enter.
+    if ROTATION_ENABLED:
+        rotation_candidates = (
+            data[(data["date"] == today) & (data["mansfield"] >= ROTATION_MIN_NEW)]
+            .sort_values("mansfield", ascending=False)
+        )
+        for _, rot_signal in rotation_candidates.iterrows():
+            rot_ticker = rot_signal["ticker"]
+            rot_sector = rot_signal["sector"]
+
+            if rot_ticker in positions:
+                continue  # Already holding this one
+
+            # Find the weakest held position in the same sector
+            weak_ticker = None
+            weak_mansfield = None
+            for held_ticker, held_pos in list(positions.items()):
+                if held_pos["sector"] != rot_sector:
+                    continue
+                if held_ticker not in ticker_data:
+                    continue
+                if today not in ticker_data[held_ticker].index:
+                    continue
+                held_mansfield = ticker_data[held_ticker].loc[today, "mansfield"]
+                if held_mansfield <= ROTATION_MAX_OLD:
+                    if weak_ticker is None or held_mansfield < weak_mansfield:
+                        weak_ticker = held_ticker
+                        weak_mansfield = held_mansfield
+
+            if weak_ticker is None:
+                continue  # No weak position to replace in this sector
+
+            # Close the weak position at today's open
+            weak_pos = positions[weak_ticker]
+            if today in ticker_data[weak_ticker].index:
+                rot_exit_price = ticker_data[weak_ticker].loc[today, "open"]
+            else:
+                rot_exit_price = weak_pos["last_price"]
+
+            rot_pnl = (rot_exit_price - weak_pos["entry"]) * weak_pos["size"]
+            cash += rot_exit_price * weak_pos["size"]
+            trade_log.append(make_trade_log_entry(
+                weak_pos, weak_ticker, today, rot_exit_price, rot_pnl, "ROTATION_OUT"
+            ))
+            del positions[weak_ticker]
+
     # ── Look for new entry signals ────────────────────────────────────────────
     # Sort candidates by Mansfield RS descending (strongest momentum first)
     candidates = data[(data["date"] == today) & data["setup_ok"]].sort_values(
@@ -685,6 +739,18 @@ else:
     print("\nSector distribution:")
     for sector, group in log_df.groupby("sector"):
         print(f"  {sector:<35}: {len(group):>4} trades | avg PnL: {group['pnl'].mean():>+8.2f}")
+
+    # Sector rotation summary
+    rotation_exits = log_df[log_df["note"] == "ROTATION_OUT"]
+    if not rotation_exits.empty:
+        print(f"\nSector rotation summary: {len(rotation_exits)} positions replaced")
+        print(f"  Avg PnL on rotated-out trades : {rotation_exits['pnl'].mean():>+8.2f}")
+        print(f"  Win% on rotated-out trades    : {rotation_exits['win'].mean()*100:.1f}%")
+        print(f"  By sector:")
+        for sector, grp in rotation_exits.groupby("sector"):
+            print(f"    {sector:<35}: {len(grp):>3} rotations | avg PnL: {grp['pnl'].mean():>+8.2f}")
+    else:
+        print("\nSector rotation: no rotations executed.")
 
     # Entry trigger distribution
     print("\nEntry trigger breakdown:")
